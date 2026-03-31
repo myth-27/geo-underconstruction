@@ -64,15 +64,26 @@ export async function POST(request: NextRequest) {
 
         // Filter valid tiles to send to Gemini
         const validTiles: { img: string, point: any, originalIndex: number }[] = [];
+        let tileFailures = 0;
         tilesBase64.forEach((tile, idx) => {
           if (tile) validTiles.push({ img: tile, point: batch[idx], originalIndex: idx });
-          console.log(`Tile fetched (${batch[idx].lat}, ${batch[idx].lng}): ${tile ? 'yes' : 'no'}`);
+          else tileFailures++;
+          console.log(`Tile fetched (${batch[idx].lat}, ${batch[idx].lng}): ${tile ? 'yes' : 'NO — Maps API error'}`);
         });
+        if (tileFailures === batch.length) {
+          console.error(`All ${batch.length} tiles failed to fetch — check GOOGLE_MAPS_STATIC_API_KEY`);
+          await send({ status: 'scanning', message: `Batch ${batchNumber}/${totalBatches}: All tile fetches failed — check Maps API key`, current: Math.min(i + BATCH_SIZE, grid.length), total: grid.length, found });
+        }
 
         if (validTiles.length > 0) {
           // Classify batch with Gemini
           const classifications = await classifyTileBatch(validTiles.map(v => v.img));
           console.log(`Classification result for batch ${batchNumber}:`, JSON.stringify(classifications));
+
+          if (!classifications) {
+            console.error(`Gemini returned null for batch ${batchNumber} — API error or model issue`);
+            await send({ status: 'scanning', message: `Batch ${batchNumber}/${totalBatches}: Gemini classification failed (check server logs)`, current: Math.min(i + BATCH_SIZE, grid.length), total: grid.length, found });
+          }
 
           if (classifications && Array.isArray(classifications)) {
             let foundInBatch = 0;
